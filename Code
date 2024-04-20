@@ -6,19 +6,23 @@
 #include "esp_camera.h"
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
+#include <Adafruit_Fingerprint.h>
+#include <SoftwareSerial.h> 
+SoftwareSerial fingerPrintSerial(2, 4);
+Adafruit_Fingerprint fingerPrint = Adafruit_Fingerprint(&fingerPrintSerial);
+const char* ssid = "Galaxy M31s";
+const char* password = "123456787654321";
 
-const char* ssid = "iPhone";
-const char* password = "123456789";
+// Инициализируйте Telegram-бота
+String BOTtoken = "7176709376:AAEf8fMabj1TAyCXvVs8DcznMWpa6Q8llyg";  // ваш токен бота (получите от Botfather)
 
-// Initialize Telegram BOT
-String BOTtoken = "7176709376:AAEf8fMabj1TAyCXvVs8DcznMWpa6Q8llyg";  // your Bot Token (Get from Botfather)
-
-// Use @myidbot to find out the chat ID of an individual or a group
-// Also note that you need to click "start" on a bot before it can
-// message you
+// Используйте @myidbot, чтобы узнать идентификатор чата отдельного человека или группы
+// Также обратите внимание, что вам нужно нажать "начать" на боте, прежде чем он сможет отправить вам сообщение.
 String CHAT_ID = "660730874";
 
 bool sendPhoto = false;
+bool fingerPrint1 = false;
+bool fingerdelete1 = false;
 
 WiFiClientSecure clientTCP;
 UniversalTelegramBot bot(BOTtoken, clientTCP);
@@ -26,7 +30,8 @@ UniversalTelegramBot bot(BOTtoken, clientTCP);
 #define FLASH_LED_PIN 4
 bool flashState = LOW;
 
-//Checks for new messages every 1 second.
+
+//Проверяет наличие новых сообщений каждые 1 секунду.
 int botRequestDelay = 1000;
 unsigned long lastTimeBotRan;
 
@@ -74,7 +79,7 @@ void configInitCamera(){
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
 
-  //init with high specs to pre-allocate larger buffers
+  //инициализация с высокими характеристиками для предварительного выделения больших буферов
   if(psramFound()){
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 10;  //0-63 lower number means higher quality
@@ -85,7 +90,7 @@ void configInitCamera(){
     config.fb_count = 1;
   }
   
-  // camera init
+  // запуск камеры
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
@@ -105,7 +110,7 @@ void handleNewMessages(int numNewMessages) {
       continue;
     }
     
-    // Print the received message
+    // Распечатайте полученное сообщение
     String text = bot.messages[i].text;
     Serial.println(text);
     
@@ -114,13 +119,21 @@ void handleNewMessages(int numNewMessages) {
       String welcome = "Welcome , " + from_name + "\n";
       welcome += "Use the following commands to interact with the ESP32-CAM \n";
       welcome += "/photo : takes a new photo\n";
-      welcome += "/flash : toggles flash LED \n";
+      welcome += "/add : add finger \n";
+      welcome += "/delete : delete finger \n";
       bot.sendMessage(CHAT_ID, welcome, "");
     }
-    if (text == "/flash") {
-      flashState = !flashState;
-      digitalWrite(FLASH_LED_PIN, flashState);
-      Serial.println("Change flash LED state");
+    if (text == "/add") {
+      fingerPrint1 = true;
+
+      String finger = "New finger was add";
+      bot.sendMessage(CHAT_ID, finger, "");
+    }
+    if (text == "/delete") {
+      fingerdelete1 = true;
+
+      String deletee = "Finger was deleted";
+      bot.sendMessage(CHAT_ID, deletee, "");
     }
     if (text == "/photo") {
       sendPhoto = true;
@@ -129,17 +142,18 @@ void handleNewMessages(int numNewMessages) {
   }
 }
 
+
 String sendPhotoTelegram() {
   const char* myDomain = "api.telegram.org";
   String getAll = "";
   String getBody = "";
 
-  //Dispose first picture because of bad quality
+  //Выбросьте первую фотографию из-за плохого качества
   camera_fb_t * fb = NULL;
   fb = esp_camera_fb_get();
-  esp_camera_fb_return(fb); // dispose the buffered image
+  esp_camera_fb_return(fb); // утилизируйте буферизованное изображение
   
-  // Take a new photo
+  // Сделайте новую фотографию
   fb = NULL;  
   fb = esp_camera_fb_get();  
   if(!fb) {
@@ -186,7 +200,7 @@ String sendPhotoTelegram() {
     
     esp_camera_fb_return(fb);
     
-    int waitTime = 10000;   // timeout 10 seconds
+    int waitTime = 10000;   // тайм-аут 10 секунд
     long startTimer = millis();
     boolean state = false;
     
@@ -218,23 +232,24 @@ String sendPhotoTelegram() {
 
 void setup(){
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
-  // Init Serial Monitor
+  // Последовательный монитор инициализации
   Serial.begin(115200);
+    fingerPrintSerial.begin(57600);
 
-  // Set LED Flash as output
+  // Установите светодиодную вспышку в качестве выходного сигнала
   pinMode(FLASH_LED_PIN, OUTPUT);
   digitalWrite(FLASH_LED_PIN, flashState);
 
-  // Config and init the camera
+  // Настройка и инициализация камеры
   configInitCamera();
 
-  // Connect to Wi-Fi
+  //Подключение к Wi-Fi
   WiFi.mode(WIFI_STA);
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
   WiFi.begin(ssid, password);
-  clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
+  clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Добавьте корневой сертификат для api.telegram.org
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(500);
@@ -258,5 +273,89 @@ void loop() {
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
     lastTimeBotRan = millis();
+  }
+  if (fingerPrint1) {
+   addFingerprint();
+    fingerPrint1 = false;
+  }
+
+  if (fingerdelete1){
+    handleNewMessages();
+    fingerdelete1 = false;
+  }
+
+   // Ожидание, пока палец не будет обнаружен
+  while (!fingerPrint.getImage()) delay(500);
+
+  // Получение отпечатка пальца
+  int fingerprintID = fingerPrint.fingerID;
+  if (fingerprintID == FINGERPRINT_NOFINGER) {
+    return;
+  }
+
+   // Ожидание, пока палец не будет удален с сенсора
+  while (fingerPrint.fingerID == fingerprintID) delay(500);
+
+  // Проверка наличия отпечатка пальца в памяти сенсора
+  if (fingerPrint.verifyPassword() == FINGERPRINT_OK) {
+
+    // Отправка сообщения "открыто" в телеграмм бота
+    bot.sendMessage(CHAT_ID, "Открыто", "");
+    sendPhotoTelegram();     
+  } else {
+    bot.sendMessage(CHAT_ID, "Нет такого отпечатка", "");
+    sendPhotoTelegram();  
+  }
+
+}
+
+
+void addFingerprint(){
+  Serial.println("Place your finger on the sensor...");
+
+  // Ожидание, пока палец не будет обнаружен
+  while (!fingerPrint.getImage()) delay(500);
+
+  // Ожидание, пока палец не будет распознан
+  int fingerprintID = fingerPrint.fingerID;
+  if (fingerprintID == FINGERPRINT_NOFINGER) {
+    Serial.println("No finger detected");
+    return;
+  }
+
+  // Ожидание, пока палец не будет удален с сенсора
+  while (fingerPrint.fingerID == fingerprintID) delay(500);
+
+  // Добавление отпечатка пальца в память сенсора
+  if (fingerPrint.storeModel(fingerprintID) == FINGERPRINT_OK) {
+    Serial.println("Fingerprint added successfully");
+  } else {
+    Serial.println("Failed to add fingerprint");
+  }
+}
+
+void handleNewMessages() {
+  Serial.println("Place your finger on the sensor...");
+
+  // Ожидание, пока палец не будет обнаружен
+  while (!fingerPrint.getImage()) delay(500);
+
+  // Получение отпечатка пальца
+  int fingerprintID = fingerPrint.fingerID;
+  if (fingerprintID == FINGERPRINT_NOFINGER) {
+    Serial.println("No finger detected");
+    return;
+  }
+
+  // Ожидание, пока палец не будет удален с сенсора
+  while (fingerPrint.fingerID == fingerprintID) delay(500);
+
+  // Удаление отпечатка пальца из памяти сенсора
+  if (fingerPrint.deleteModel(fingerprintID) == FINGERPRINT_OK) {
+    Serial.println("Fingerprint deleted successfully");
+    bot.sendMessage(CHAT_ID, "Отпечаток удален", "");
+  } else {
+    Serial.println("Failed to delete fingerprint");
+    bot.sendMessage(CHAT_ID, "Ошибка при удалении отпечатка", "");
   }
 }
